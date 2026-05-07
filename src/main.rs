@@ -94,6 +94,70 @@ fn lookup_mac(
     result
 }
 
+fn lookup_mac_verbose(
+    client: &reqwest::blocking::Client,
+    config: &Config,
+    mac: &str,
+) -> Result<Option<String>, String> {
+    let url = format!(
+        "{}/api/dcim/interfaces/?mac_address={}",
+        config.netbox_url.trim_end_matches('/'),
+        mac
+    );
+
+    let auth = match &config.netbox_key {
+        Some(key) => format!("Bearer nbt_{}.{}", key, config.netbox_token),
+        None => format!("Token {}", config.netbox_token),
+    };
+
+    let resp = client
+        .get(&url)
+        .header("Authorization", &auth)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}: {}", resp.status(), resp.status().canonical_reason().unwrap_or("unknown")));
+    }
+
+    let body: NetBoxResponse = resp
+        .json()
+        .map_err(|e| format!("failed to parse response: {}", e))?;
+
+    let iface = match body.results.into_iter().next() {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+
+    let device_url = match &iface.device {
+        Some(d) => &d.url,
+        None => return Ok(None),
+    };
+
+    let resp = client
+        .get(device_url)
+        .header("Authorization", &auth)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|e| format!("device request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("device HTTP {}: {}", resp.status(), resp.status().canonical_reason().unwrap_or("unknown")));
+    }
+
+    let device: NetBoxDeviceFull = resp
+        .json()
+        .map_err(|e| format!("failed to parse device response: {}", e))?;
+
+    let name = match device.asset_tag {
+        Some(tag) => format!("{}:{}:{}", device.name, tag, iface.name),
+        None => format!("{}:{}", device.name, iface.name),
+    };
+
+    Ok(Some(name))
+}
+
 fn main() {
     let config = match load_config() {
         Ok(c) => c,
@@ -104,6 +168,21 @@ fn main() {
     };
 
     let client = reqwest::blocking::Client::new();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 {
+        let mac = &args[1];
+        match lookup_mac_verbose(&client, &config, mac) {
+            Ok(Some(device)) => println!("(netbox://{})", device),
+            Ok(None) => println!("No device found for {}", mac),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let mut cache: HashMap<String, Option<String>> = HashMap::new();
     let stdin = io::stdin();
 

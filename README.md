@@ -41,7 +41,12 @@ This uses the `Bearer nbt_<key>.<token>` authorization header.
 
 ### Run
 
-Pipe arp-scan into arpbox.
+Look up a single MAC address:
+```console
+$ arpbox 00:11:22:33:44:55
+```
+
+Or pipe arp-scan into arpbox:
 ```console
 $ arp-scan --localnet | arpbox
 ```
