@@ -118,7 +118,11 @@ fn lookup_mac_verbose(
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), resp.status().canonical_reason().unwrap_or("unknown")));
+        return Err(format!(
+            "HTTP {}: {}",
+            resp.status(),
+            resp.status().canonical_reason().unwrap_or("unknown")
+        ));
     }
 
     let body: NetBoxResponse = resp
@@ -143,7 +147,11 @@ fn lookup_mac_verbose(
         .map_err(|e| format!("device request failed: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("device HTTP {}: {}", resp.status(), resp.status().canonical_reason().unwrap_or("unknown")));
+        return Err(format!(
+            "device HTTP {}: {}",
+            resp.status(),
+            resp.status().canonical_reason().unwrap_or("unknown")
+        ));
     }
 
     let device: NetBoxDeviceFull = resp
