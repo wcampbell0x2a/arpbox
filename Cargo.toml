@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["arp", "netbox"]
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
