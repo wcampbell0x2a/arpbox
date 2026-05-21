@@ -33,6 +33,11 @@ struct NetBoxDeviceFull {
     asset_tag: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct NetBoxDeviceResponse {
+    results: Vec<NetBoxDeviceFull>,
+}
+
 fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     let config_dir = dirs::config_dir().ok_or("could not determine config directory")?;
     let config_path = config_dir.join("arpbox").join("config.toml");
@@ -90,80 +95,35 @@ fn lookup_mac(
             })
         });
 
+    // Fallback: search device custom field
+    let result = if result.is_none() {
+        let device_url = format!(
+            "{}/api/dcim/devices/?cf_MAC={}",
+            config.netbox_url.trim_end_matches('/'),
+            mac
+        );
+        client
+            .get(&device_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/json")
+            .send()
+            .ok()
+            .and_then(|resp| resp.json::<NetBoxDeviceResponse>().ok())
+            .and_then(|body| {
+                body.results
+                    .into_iter()
+                    .next()
+                    .map(|device| match device.asset_tag {
+                        Some(tag) => format!("{}:{}", device.name, tag),
+                        None => device.name,
+                    })
+            })
+    } else {
+        result
+    };
+
     cache.insert(mac.to_string(), result.clone());
     result
-}
-
-fn lookup_mac_verbose(
-    client: &reqwest::blocking::Client,
-    config: &Config,
-    mac: &str,
-) -> Result<Option<String>, String> {
-    let url = format!(
-        "{}/api/dcim/interfaces/?mac_address={}",
-        config.netbox_url.trim_end_matches('/'),
-        mac
-    );
-
-    let auth = match &config.netbox_key {
-        Some(key) => format!("Bearer nbt_{}.{}", key, config.netbox_token),
-        None => format!("Token {}", config.netbox_token),
-    };
-
-    let resp = client
-        .get(&url)
-        .header("Authorization", &auth)
-        .header("Accept", "application/json")
-        .send()
-        .map_err(|e| format!("request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "HTTP {}: {}",
-            resp.status(),
-            resp.status().canonical_reason().unwrap_or("unknown")
-        ));
-    }
-
-    let body: NetBoxResponse = resp
-        .json()
-        .map_err(|e| format!("failed to parse response: {}", e))?;
-
-    let iface = match body.results.into_iter().next() {
-        Some(i) => i,
-        None => return Ok(None),
-    };
-
-    let device_url = match &iface.device {
-        Some(d) => &d.url,
-        None => return Ok(None),
-    };
-
-    let resp = client
-        .get(device_url)
-        .header("Authorization", &auth)
-        .header("Accept", "application/json")
-        .send()
-        .map_err(|e| format!("device request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "device HTTP {}: {}",
-            resp.status(),
-            resp.status().canonical_reason().unwrap_or("unknown")
-        ));
-    }
-
-    let device: NetBoxDeviceFull = resp
-        .json()
-        .map_err(|e| format!("failed to parse device response: {}", e))?;
-
-    let name = match device.asset_tag {
-        Some(tag) => format!("{}:{}:{}", device.name, tag, iface.name),
-        None => format!("{}:{}", device.name, iface.name),
-    };
-
-    Ok(Some(name))
 }
 
 fn main() {
@@ -176,22 +136,18 @@ fn main() {
     };
 
     let client = reqwest::blocking::Client::new();
+    let mut cache: HashMap<String, Option<String>> = HashMap::new();
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() == 2 {
         let mac = &args[1];
-        match lookup_mac_verbose(&client, &config, mac) {
-            Ok(Some(device)) => println!("(netbox://{})", device),
-            Ok(None) => println!("No device found for {}", mac),
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
+        match lookup_mac(&client, &config, mac, &mut cache) {
+            Some(device) => println!("(netbox://{})", device),
+            None => println!("No device found for {}", mac),
         }
         return;
     }
 
-    let mut cache: HashMap<String, Option<String>> = HashMap::new();
     let stdin = io::stdin();
 
     for line in stdin.lock().lines() {

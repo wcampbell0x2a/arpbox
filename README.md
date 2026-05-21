@@ -56,4 +56,8 @@ Lines with a NetBox match are enriched:
 192.168.1.1	00:11:22:33:44:55	(netbox://device-name:asset-tag:interface)	Vendor Name
 ```
 
+Lookup order:
+1. Interface MAC address match (`/api/dcim/interfaces/`)
+2. Device custom field `cf_MAC` match (`/api/dcim/devices/`)
+
 Lines without a match pass through unchanged.
